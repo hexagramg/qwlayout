@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
-import port.py as prt
+import port as prt
 import copy
-import muliprocessing as mp
+import multiprocessing as mp
+from functools import partial
+import random
+
 
 def NpSummIndex(index, prepNp):
     ivalues = IntersectionNp(prepNp[0], index)
@@ -19,8 +22,10 @@ def NpSummIndex(index, prepNp):
 def IntersectionNp(main, sub):
     return np.array([np.where(main == x) for x in sub]).flatten()
 
-
+# aggregates values 
 def NpSummIndexColumn(index, column, prepNp):
+    """aggregates values that according to indexes and columns of 
+    transition matrix """
     ivalues = IntersectionNp(prepNp[0], index)
     cvalues = IntersectionNp(prepNp[2], column)
     arr = prepNp[1]
@@ -39,35 +44,79 @@ class Grades:
     divided by total cases"""
     @staticmethod
     def NcalcUniformity(zones, prepNp):
-        def prepUniform():  # returns array of cases by each zone
+        def prepUniform():  
+            """ returns array of cases by each zone"""
             calculatedZones = []
-            for zone in zones:
+            for i, zone in enumerate(zones):
                 lablist = [x for x in zone]
-                calculatedZones.append(NpSummIndex(lablist, prepNp))
+                summ = NpSummIndex(lablist, prepNp)
+                if i == 0 or i == len(zones) - 1:
+                    # pinky finger is marginally weaker 
+                    # than other fingers, this weight is to compensate that
+                    summ = summ * 4
+                calculatedZones.append(summ)
             return calculatedZones
         cZones = prepUniform()
         avgLoad = sum(cZones) / len(cZones)
-        positiveDelta = [x - avgLoad for x in cZones if x > avgLoad]
+        positiveDelta = [pow(x - avgLoad,2) for x in cZones if x > avgLoad]
         return sum(positiveDelta)/np.sum(prepNp[1])
 
-    # returns percentage of cases that are not alterated between hands
+
+    @staticmethod
+    def NcalcUnreachability(labels, prepNp):
+        """grade that punishes model for far reachable keys
+        """
+        reachWeights = [[16,0.1,0.1,0.1,8,8,0.1,0.1,0.1,16,16,16],
+                        [4,0,0,0,0,0,0,0,0,4,8,16],
+                        [8,1,4,1,8,8,1,4,1,8,16,16]]
+        entries = [[NpSummIndex(char, prepNp)  for char in row] for row in labels]
+        cases = np.sum(np.multiply(reachWeights, entries))
+        return cases/np.sum(prepNp[1])
+
     @staticmethod
     def NcalcAlteration(parts, prepNp):
+        """returns percentage of cases that are not alterated between hands
+        """
         case = 0
         for i, part in enumerate(parts):
             lablist = [x for x in part]
-            labOplist = [x for x in parts[i - len(parts)]]
-            case += NpSummIndexColumn(lablist, labOplist, prepNp)
-        return 1 - case/np.sum(prepNp[1])
+            # probably wont need it
+            # labOplist = [x for x in parts[i - len(parts)]]
+            case += NpSummIndexColumn(lablist, lablist, prepNp)
+        return case/np.sum(prepNp[1])
 
     @staticmethod
     def NcalcProximity(labels, prepNp):
-        cases = NpSummIndex(np.append(labels[1][0:4], labels[1][6:-2]), prepNp)
+        cases = NpSummIndex(np.append(labels[1][0:5], labels[1][5:-2]), prepNp)
         return 1 - (cases/np.sum(prepNp[1]))
 
-    # returns percentage of cases that lead to repetition of zone
+    @staticmethod
+    def NcalcVerticalAlteration(labels, parts, prepNp):
+        """ returns percentage of cases that are vertical alteration
+        inside the part"""
+
+        def getRowForPart(index, parts_, labels_):
+            """ 
+            returns array of arrays of chars that
+            are intersection of label row and parts
+            Args:
+                index (int): variable is row_index in labels.
+            """
+            return [[label for label in labels_[index] if label in x] for x in parts_]
+        case = 0
+        topParts = getRowForPart(0, parts, labels) 
+        bottomParts = getRowForPart(2, parts, labels)
+
+        for i, part in enumerate(topParts):
+            case += NpSummIndexColumn(part, bottomParts[i], prepNp)
+            case += NpSummIndexColumn(bottomParts[i], part, prepNp)
+
+        return case/np.sum(prepNp[1])
+
     @staticmethod
     def NcalcRepeats(zones, prepNp): 
+        """ returns percentage of cases that lead to repetition of zone"""
+
         depth = []
         for zone in zones:
             lablist = [x for x in zone]
@@ -79,41 +128,53 @@ def buffSorted(x):
     return x[1]
 
 
-def NiterateAlgo(labels_, prepNp, quanity):
-    innerLabels = [(labels_,4)]
+def NiterateAlgo(labels_, prepNp, quanity, weights):
+    innerLabels = [(labels_,sum(weights))]
     historyLabels = []
-    with mp.Pool(processes=4) as pool:
+    with mp.Pool(processes=10) as pool:
         for i in range(0,quanity):
-            buffLabels = []
-            for k in range(0,len(innerLabels)):
-                label = innerLabels[k][0]
-                computed = pool.apply(NcomPute(label, prepNp, labels_))
-                buffLabels = buffLabels + computed
+            func = partial(NcomPute, prepNp=prepNp, labels_ = labels_, weights=weights)
             historyLabels = historyLabels+innerLabels
-            sortLb= sorted(buffLabels, key=buffSorted)
-            innerLabels = sortLb[:10]
+            computed = pool.map(func, innerLabels)
+            bRshape = np.array(computed)
+            reshapen = bRshape.reshape(-1, *bRshape.shape[2:])
+            sortLb= sorted(reshapen.tolist(), key=buffSorted)
+            sortEnd = 6
+            randMax = 6
+            if len(sortLb) + sortEnd > randMax:
+                randEnd = 0
+            else:
+                randEnd = randMax
+            innerLabels = sortLb[:sortEnd]
+            addRand = [random.randint(sortEnd, len(sortLb) - 1) for i in range(0,randEnd)]
+            innerLabels += [sortLb[i] for i in addRand]
     historyLabels += innerLabels
     return historyLabels 
 
 
-def NcomPute(label, prepNp, labels_):
-
+def NcomPute(innerLabels, prepNp, labels_, weights):
+    label = innerLabels[0] 
     def modifyLabel(cc,labels):
         x,y,z,c,summ = cc[0], cc[1], cc[2],cc[3], cc[4]
         newLabels = copy.deepcopy(labels)
         newLabels[x][y], newLabels[z][c] = newLabels[z][c], newLabels[x][y]
         return (newLabels, summ)
 
-    cols = [('Uniformity',float), ('Alteration',float), ('Repeats',float),('Proximity',float), ('Summ',float), ('x',int), ('y',int), ('z',int), ('c',np.int), ('from',np.unicode_,1), ('to',np.unicode_,1)]
-    result = NfullIteration(label, prepNp, labels_)
-    tupylize = []
-    for res in result:
-        tupylize.append(tuple(res))
-    sortedNp = np.array(tupylize, dtype=cols)
+    cols = [('Uniformity',float), ('Alteration',float), ('Repeats',float),('Proximity',float),
+        ('VerticalAlt', float), 
+        ('Summ',float), ('x',int), ('y',int), ('z',int), ('c',np.int), ('from',np.unicode_,1), 
+        ('to',np.unicode_,1)]
+    results = NfullIteration(label, prepNp, labels_, weights)
+    #tupleResults = []
+    #for res in results:
+    #    tupleResults.append(tuple(res))
+    tupleResults = [tuple(res) for res in results]
+    sortedNp = np.array(tupleResults, dtype=cols)
     sortedNp.sort(order='Summ')
 
-    def getCoordinates(self):
-        return sortedNp[:5][['x','y','z','c', 'Summ']]
+    def getCoordinates():
+        return sortedNp[:9][['x','y','z','c', 'Summ']]
+
     cordList = getCoordinates()
 
     def transformCoord():
@@ -132,11 +193,11 @@ def exchange(array, x,y,z,c):
     return newArr
 
 
-def NfullIteration(labels_, prepNp, labelsInit):
+def NfullIteration(labels_, prepNp, labelsInit, weights):
     results = []
     initResult = NcalcResults(labelsInit,prepNp)
-    multipliers = [1/x for x in initResult]
-    sumInitResult = sum(initResult)
+    multipliers = [weights[i]/x for i,x in enumerate(initResult)]
+    sumInitResult = sum(weights)
     for x, row in enumerate(labels_):
         for y, label in enumerate(row):
             for z, rowSec in enumerate(labels_):
@@ -147,7 +208,7 @@ def NfullIteration(labels_, prepNp, labelsInit):
                         newResult = NcalcResults(newLabels, prepNp)
                         weightedResult = [x*multipliers[i] for i,x in enumerate(newResult)]
                         sumNewResult =  sum(weightedResult)#newResult)
-                        if sumNewResult < len(initResult): #sumInitResult:
+                        if sumNewResult < sumInitResult: #if newResult is less than summOfWeights of initial label:
                             weightedResult += [sumNewResult,x,y,z,c,label,labelSec]
                             results.append(weightedResult)
     return results
@@ -160,5 +221,6 @@ def NcalcResults(labels, prepNp):
     result.append(Grades.NcalcUniformity(zones,prepNp))
     result.append(Grades.NcalcAlteration(parts,prepNp))
     result.append(Grades.NcalcRepeats(zones,prepNp))
-    result.append(Grades.NcalcProximity(labels,prepNp))
+    result.append(Grades.NcalcUnreachability(labels,prepNp))
+    result.append(Grades.NcalcVerticalAlteration(labels, parts, prepNp))
     return result

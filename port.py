@@ -5,13 +5,13 @@ from html.parser import HTMLParser
 import matplotlib.pyplot as plt
 import matplotlib as mtp
 
-
+phrases_ = []
 class DataParser(HTMLParser):
     def handle_data(self, data):
 
         splitted = data.split(':')
         filtered =  re.sub("[^\u0430-\u044F ]", "", ''.join(splitted[1:]).lower())
-        self.phrases = filtered
+        phrases_.append(filtered)
 
 
 """Класс для всех операций с данными"""
@@ -27,12 +27,11 @@ class DataHandler:
         self.saveDfToNp()
     """Загрузка данных"""
     def loadData(self, path):
-        self.phrases = []
         data = pd.read_csv(path, sep='\t', header=0)
         parser = DataParser()
         for episode in data["dialogue"].to_numpy().tolist():
             parser.feed(episode)
-            self.phrases.append(parser.phrases)
+        self.phrases = phrases_
     """Добавить в словарь ключ или инкрементировать"""
     def incOrAdd(self, key, dictionary):
         if key not in dictionary:
@@ -118,6 +117,7 @@ def convoluteZone(labels):  # returns array of str(letters) by finger zones
     return newZone
 
 
+# returns array of str(letters) for hand zones
 def convoluteParts(labels):
     newPart = []
     for x, row in enumerate(labels):
