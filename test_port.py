@@ -29,3 +29,11 @@ class TestDataHandler(ut.TestCase):
                 ['я', 'ч', 'с', 'м', 'и', 'т', 'ь', 'б', 'ю', '', '', '']]
         result = gd.Grades.NcalcVerticalAlteration(labels, pt.convoluteParts(labels), test.DfToNp)
         self.assertTrue(result > 0)
+
+    def testUniformity(self):
+        test = pt.DataHandler("dialogues.tsv")
+        labels = [['й', 'ц', 'у', 'к', 'е', 'н', 'г', 'ш', 'щ', 'з', 'х', 'ъ'],
+                  ['ф', 'ы', 'в', 'а', 'п', 'р', 'о', 'л', 'д', 'ж', 'э', ''],
+                  ['я', 'ч', 'с', 'м', 'и', 'т', 'ь', 'б', 'ю', '', '', '']]
+        result = gd._debug_uniformity(labels, test.DfToNp)
+        self.assertTrue(result > 0)

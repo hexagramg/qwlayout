@@ -13,12 +13,13 @@ def SIScaledToDf(SIScaledArr):
 def NscaleLabelsArray(initial, derivatives, prepNp):
     initialResult = gd.NcalcResults(initial, prepNp)
     multipliers = [1/x for x in initialResult]
-    scaled = [ [y*multipliers[i] for i,y in enumerate(gd.NcalcResults(x,prepNp))] for x in np.array(derivatives)[:,0]]
+    scaled = [[y*multipliers[i] for i, y in enumerate(gd.NcalcResults(x, prepNp))]
+                for x in np.array(derivatives)[:, 0]]
     return scaled
     
 
 def addSummIndexToScaled(scaledArr):
-    return [x+[sum(x),i] for i,x in enumerate(scaledArr)]
+    return [x+[sum(x), i] for i, x in enumerate(scaledArr)]
 
 
 '''matcher function takes label and returns depth'''
@@ -40,9 +41,9 @@ def drawLayout(labels, matcher, collapse, transDf):
             depth.append(drow)
     fig, ax = plt.subplots()
     if collapse == 1:   
-        ax = sns.heatmap(np.array([[x] for x in depth]),annot = np.array([[x] for x in labels]),fmt = '')
+        ax = sns.heatmap(np.array([[x] for x in depth]),annot=np.array([[x] for x in labels]), fmt='')
     else:
-        ax = sns.heatmap(np.array(depth),annot = np.array(labels),fmt = '')
+        ax = sns.heatmap(np.array(depth), annot=np.array(labels), fmt='')
 
 
 def translationMatcher(label, transDf):

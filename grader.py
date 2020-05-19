@@ -5,6 +5,16 @@ import copy
 import multiprocessing as mp
 from functools import partial
 import random
+import  statistics
+
+REACH_WEIGHTS = [[16, 1,   0,   1,   8,  8,  1,   0,   1,  16, 16, 16],
+                 [4,  0,   0,   0,   0,  0,  0,   0,   0,   4,  8,  16],
+                 [8,  2,   4,   2,   8,  8,  2,   4,   2,   8,  16, 16]]
+
+PINKY = 4
+
+SORT_END = 6
+RAND_MAX = 6
 
 
 def NpSummIndex(index, prepNp):
@@ -39,26 +49,38 @@ def NpSummIndexColumn(index, column, prepNp):
     return agg
 
 
+def _debug_uniformity(labels, prepNp):
+    zones = prt.convoluteZone(labels)
+    cZones = Grades.prepUniform(zones, prepNp)
+    avgLoad = statistics.median(cZones)
+    positiveDelta = [pow(x - avgLoad, 2) for x in cZones if x > avgLoad]
+    return cZones, avgLoad, positiveDelta
+
+
 class Grades:
-    """returns summ of positive differences between each zone and average
-    divided by total cases"""
+    @staticmethod
+    def prepUniform(zones, prepNp):
+        """ returns array of cases by each zone"""
+        calculatedZones = []
+        for i, zone in enumerate(zones):
+            lablist = [x for x in zone]
+            summ = NpSummIndex(lablist, prepNp)
+            if i == 0 or i == len(zones) - 1:
+                # pinky finger is marginally weaker
+                # than other fingers, this weight is to compensate that
+                summ = summ * PINKY
+            calculatedZones.append(summ)
+        return calculatedZones
+
     @staticmethod
     def NcalcUniformity(zones, prepNp):
-        def prepUniform():  
-            """ returns array of cases by each zone"""
-            calculatedZones = []
-            for i, zone in enumerate(zones):
-                lablist = [x for x in zone]
-                summ = NpSummIndex(lablist, prepNp)
-                if i == 0 or i == len(zones) - 1:
-                    # pinky finger is marginally weaker 
-                    # than other fingers, this weight is to compensate that
-                    summ = summ * 4
-                calculatedZones.append(summ)
-            return calculatedZones
-        cZones = prepUniform()
-        avgLoad = sum(cZones) / len(cZones)
-        positiveDelta = [pow(x - avgLoad,2) for x in cZones if x > avgLoad]
+        """returns summ of positive differences between each zone and average
+        divided by total cases"""
+
+        cZones = Grades.prepUniform(zones, prepNp)
+        #avgLoad = sum(cZones) / len(cZones)
+        avgLoad = statistics.median(cZones)
+        positiveDelta = [x - avgLoad for x in cZones if x > avgLoad]
         return sum(positiveDelta)/np.sum(prepNp[1])
 
 
@@ -66,11 +88,8 @@ class Grades:
     def NcalcUnreachability(labels, prepNp):
         """grade that punishes model for far reachable keys
         """
-        reachWeights = [[16,0.1,0.1,0.1,8,8,0.1,0.1,0.1,16,16,16],
-                        [4,0,0,0,0,0,0,0,0,4,8,16],
-                        [8,1,4,1,8,8,1,4,1,8,16,16]]
-        entries = [[NpSummIndex(char, prepNp)  for char in row] for row in labels]
-        cases = np.sum(np.multiply(reachWeights, entries))
+        entries = [[NpSummIndex(char, prepNp) for char in row] for row in labels]
+        cases = np.sum(np.multiply(REACH_WEIGHTS, entries))
         return cases/np.sum(prepNp[1])
 
     @staticmethod
@@ -131,23 +150,23 @@ def buffSorted(x):
 def NiterateAlgo(labels_, prepNp, quanity, weights):
     innerLabels = [(labels_,sum(weights))]
     historyLabels = []
-    with mp.Pool(processes=10) as pool:
+    with mp.Pool(processes=15) as pool:
         for i in range(0,quanity):
-            func = partial(NcomPute, prepNp=prepNp, labels_ = labels_, weights=weights)
+            func = partial(NcomPute, prepNp=prepNp, labels_=labels_, weights=weights)
             historyLabels = historyLabels+innerLabels
             computed = pool.map(func, innerLabels)
             bRshape = np.array(computed)
             reshapen = bRshape.reshape(-1, *bRshape.shape[2:])
-            sortLb= sorted(reshapen.tolist(), key=buffSorted)
-            sortEnd = 6
-            randMax = 6
-            if len(sortLb) + sortEnd > randMax:
+            sortLb = sorted(reshapen.tolist(), key=buffSorted)
+            sortEnd = SORT_END
+            randMax = RAND_MAX
+            if len(sortLb) + sortEnd < randMax: #>
                 randEnd = 0
             else:
                 randEnd = randMax
-            innerLabels = sortLb[:sortEnd]
-            addRand = [random.randint(sortEnd, len(sortLb) - 1) for i in range(0,randEnd)]
-            innerLabels += [sortLb[i] for i in addRand]
+            addRand = [random.randint(sortEnd, len(sortLb) - 1) for i in range(0, randEnd)]
+            innerLabels = [sortLb[i] for i in addRand]
+            innerLabels += sortLb[:sortEnd][::-1]
     historyLabels += innerLabels
     return historyLabels 
 
@@ -187,7 +206,7 @@ def NcomPute(innerLabels, prepNp, labels_, weights):
     return buffLabels
 
 
-def exchange(array, x,y,z,c):
+def exchange(array, x, y, z, c):
     newArr = copy.deepcopy(array)
     newArr[x][y], newArr[z][c] = newArr[z][c], newArr[x][y]
     return newArr
@@ -195,8 +214,8 @@ def exchange(array, x,y,z,c):
 
 def NfullIteration(labels_, prepNp, labelsInit, weights):
     results = []
-    initResult = NcalcResults(labelsInit,prepNp)
-    multipliers = [weights[i]/x for i,x in enumerate(initResult)]
+    initResult = NcalcResults(labelsInit, prepNp)
+    multipliers = [i/x for i, x in zip(weights, initResult)]
     sumInitResult = sum(weights)
     for x, row in enumerate(labels_):
         for y, label in enumerate(row):
@@ -204,9 +223,9 @@ def NfullIteration(labels_, prepNp, labelsInit, weights):
                 for c, labelSec in enumerate(rowSec):
                     if x != z and y != c and x >= z:
 
-                        newLabels = exchange(labels_, x,y,z,c)
+                        newLabels = exchange(labels_, x, y, z, c)
                         newResult = NcalcResults(newLabels, prepNp)
-                        weightedResult = [x*multipliers[i] for i,x in enumerate(newResult)]
+                        weightedResult = [x*multiplier for x, multiplier in zip(newResult, multipliers)]
                         sumNewResult =  sum(weightedResult)#newResult)
                         if sumNewResult < sumInitResult: #if newResult is less than summOfWeights of initial label:
                             weightedResult += [sumNewResult,x,y,z,c,label,labelSec]
@@ -217,10 +236,9 @@ def NfullIteration(labels_, prepNp, labelsInit, weights):
 def NcalcResults(labels, prepNp):
     zones = prt.convoluteZone(labels)
     parts = prt.convoluteParts(labels)
-    result = []
-    result.append(Grades.NcalcUniformity(zones,prepNp))
-    result.append(Grades.NcalcAlteration(parts,prepNp))
-    result.append(Grades.NcalcRepeats(zones,prepNp))
-    result.append(Grades.NcalcUnreachability(labels,prepNp))
-    result.append(Grades.NcalcVerticalAlteration(labels, parts, prepNp))
+    result = (Grades.NcalcUniformity(zones, prepNp),
+              Grades.NcalcAlteration(parts, prepNp),
+              Grades.NcalcRepeats(zones, prepNp),
+              Grades.NcalcUnreachability(labels, prepNp),
+              Grades.NcalcVerticalAlteration(labels, parts, prepNp))
     return result
